@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/Elementi di soluzione/" />
+  <Project Path="franco/franco.vcxproj" Id="951d3d61-4f73-45db-8ff6-697df8317551" />
+</Solution>
